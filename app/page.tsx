@@ -5,11 +5,12 @@ import dynamic from 'next/dynamic';
 import FileUpload from '@/components/FileUpload';
 import PhysicsControls from '@/components/PhysicsControls';
 import TipoverIndicator from '@/components/TipoverIndicator';
+import CylinderControls, { CylinderAdjustments, defaultAdjustments } from '@/components/CylinderControls';
 import { parsePlyFile, ParsedPly } from '@/lib/ply-parser';
 import { detectVolume, VolumeDetectionResult, volumeToML, estimateCupMass } from '@/lib/volume-detection';
 import { calculatePhysicsState, PhysicsState, toRadians, CylinderParams } from '@/lib/tipover-physics';
 import { CylinderFit } from '@/lib/cylinder-fitting';
-import { Beaker, RotateCcw, Info } from 'lucide-react';
+import { Beaker, RotateCcw, Info, ChevronDown, ChevronRight } from 'lucide-react';
 
 // Dynamic import for PlyViewer to avoid SSR issues with Three.js
 const PlyViewer = dynamic(() => import('@/components/SplatViewer'), {
@@ -23,22 +24,14 @@ const PlyViewer = dynamic(() => import('@/components/SplatViewer'), {
 
 // Estimate a reasonable unit scale based on detected dimensions
 function estimateUnitScale(cylinder: CylinderFit): number {
-  // Typical cup dimensions: height 8-12cm, diameter 7-10cm
-  // If detected height is around 0.1, units are likely meters
-  // If detected height is around 10, units are likely centimeters
-  // If detected height is around 100, units are likely millimeters
-
   const detectedHeight = cylinder.height;
 
   if (detectedHeight < 0.5) {
-    // Likely meters
-    return 1;
+    return 1; // meters
   } else if (detectedHeight < 50) {
-    // Likely centimeters
-    return 0.01;
+    return 0.01; // centimeters
   } else {
-    // Likely millimeters
-    return 0.001;
+    return 0.001; // millimeters
   }
 }
 
@@ -50,18 +43,19 @@ export default function Home() {
   const [fillLevel, setFillLevel] = useState(0.65);
   const [tiltAngle, setTiltAngle] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [cylinderAdjustments, setCylinderAdjustments] = useState<CylinderAdjustments>(defaultAdjustments);
+  const [showCylinderControls, setShowCylinderControls] = useState(false);
 
   const handleFileLoaded = useCallback(async (buffer: ArrayBuffer, fileName: string) => {
     setIsLoading(true);
     setError(null);
+    setCylinderAdjustments(defaultAdjustments); // Reset adjustments on new file
 
     try {
-      // Parse PLY file
       const parsed = parsePlyFile(buffer);
       setParsedPly(parsed);
       setPlyBuffer(buffer);
 
-      // Detect volume
       const volume = detectVolume(parsed);
       if (volume) {
         setVolumeResult(volume);
@@ -79,29 +73,46 @@ export default function Home() {
   const handleReset = useCallback(() => {
     setFillLevel(0.65);
     setTiltAngle(0);
+    setCylinderAdjustments(defaultAdjustments);
   }, []);
 
-  // Calculate physics state
-  const physicsState = useMemo((): PhysicsState | null => {
+  // Get adjusted cylinder for physics calculations
+  const adjustedCylinder = useMemo((): CylinderFit | null => {
     if (!volumeResult) return null;
+    const cyl = volumeResult.cylinder;
+    const adj = cylinderAdjustments;
 
-    const cylinder = volumeResult.cylinder;
-    const unitScale = estimateUnitScale(cylinder);
+    return {
+      ...cyl,
+      center: [
+        cyl.center[0] + adj.offsetX,
+        cyl.center[1] + adj.offsetY,
+        cyl.center[2] + adj.offsetZ
+      ],
+      radius: cyl.radius * adj.radiusScale,
+      height: cyl.height * adj.heightScale
+    };
+  }, [volumeResult, cylinderAdjustments]);
+
+  // Calculate physics state using adjusted cylinder
+  const physicsState = useMemo((): PhysicsState | null => {
+    if (!adjustedCylinder) return null;
+
+    const unitScale = estimateUnitScale(adjustedCylinder);
 
     const cylinderParams: CylinderParams = {
       center: {
-        x: cylinder.center[0],
-        y: cylinder.center[1],
-        z: cylinder.center[2]
+        x: adjustedCylinder.center[0],
+        y: adjustedCylinder.center[1],
+        z: adjustedCylinder.center[2]
       },
-      radius: cylinder.radius,
-      height: cylinder.height
+      radius: adjustedCylinder.radius,
+      height: adjustedCylinder.height
     };
 
-    // Estimate cup mass based on geometry
     const cupMass = estimateCupMass(
-      cylinder.radius * unitScale,
-      cylinder.height * unitScale
+      adjustedCylinder.radius * unitScale,
+      adjustedCylinder.height * unitScale
     );
 
     return calculatePhysicsState(
@@ -109,18 +120,19 @@ export default function Home() {
       fillLevel,
       toRadians(tiltAngle),
       cupMass,
-      1000 // water density
+      1000
     );
-  }, [volumeResult, fillLevel, tiltAngle]);
+  }, [adjustedCylinder, fillLevel, tiltAngle]);
 
-  // Calculate volume in mL
+  // Calculate volume in mL using adjusted cylinder
   const volumeML = useMemo((): number => {
-    if (!volumeResult) return 0;
-    const unitScale = estimateUnitScale(volumeResult.cylinder);
-    return volumeToML(volumeResult.interiorVolume, unitScale);
-  }, [volumeResult]);
+    if (!adjustedCylinder) return 0;
+    const unitScale = estimateUnitScale(adjustedCylinder);
+    const volume = Math.PI * adjustedCylinder.radius ** 2 * adjustedCylinder.height;
+    return volumeToML(volume, unitScale);
+  }, [adjustedCylinder]);
 
-  const unitScale = volumeResult ? estimateUnitScale(volumeResult.cylinder) : 1;
+  const unitScale = adjustedCylinder ? estimateUnitScale(adjustedCylinder) : 1;
 
   return (
     <main className="min-h-screen bg-gray-950 text-white">
@@ -129,7 +141,7 @@ export default function Home() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Beaker className="w-8 h-8 text-blue-500" />
-            <h1 className="text-xl font-bold">Cup Tipover Physics Analyzer</h1>
+            <h1 className="text-xl font-bold">Cup Pour Dynamics Analyzer</h1>
           </div>
           {volumeResult && (
             <button
@@ -156,8 +168,9 @@ export default function Home() {
                   <ol className="list-decimal list-inside space-y-1">
                     <li>Upload a PLY point cloud (.ply) file of a cup</li>
                     <li>The app automatically detects the cup's interior volume</li>
-                    <li>Adjust fill level and tilt angle to see physics simulation</li>
-                    <li>View tipover angle and stability status in real-time</li>
+                    <li>Adjust cylinder alignment manually if needed</li>
+                    <li>Adjust fill level and tilt angle to simulate pouring</li>
+                    <li>View spill analysis and stability status in real-time</li>
                   </ol>
                 </div>
               </div>
@@ -172,6 +185,7 @@ export default function Home() {
                 <PlyViewer
                   plyBuffer={plyBuffer}
                   cylinder={volumeResult?.cylinder || null}
+                  cylinderAdjustments={cylinderAdjustments}
                   physicsState={physicsState}
                   tiltAngle={tiltAngle}
                 />
@@ -185,16 +199,41 @@ export default function Home() {
             </div>
 
             {/* Controls Panel */}
-            <div className="space-y-6">
+            <div className="space-y-6 max-h-[calc(100vh-180px)] overflow-y-auto pr-2">
               {/* File Upload */}
               <div className="bg-gray-900 rounded-xl p-4">
                 <h2 className="text-sm font-medium text-gray-400 mb-3">PLY File</h2>
                 <FileUpload onFileLoaded={handleFileLoaded} isLoading={isLoading} />
               </div>
 
+              {/* Manual Cylinder Adjustments */}
+              <div className="bg-gray-900 rounded-xl p-4">
+                <button
+                  onClick={() => setShowCylinderControls(!showCylinderControls)}
+                  className="w-full flex items-center justify-between text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors"
+                >
+                  <span>Cylinder Alignment</span>
+                  {showCylinderControls ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4" />
+                  )}
+                </button>
+                {showCylinderControls && (
+                  <div className="mt-4">
+                    <CylinderControls
+                      adjustments={cylinderAdjustments}
+                      onChange={setCylinderAdjustments}
+                      bounds={parsedPly?.bounds || null}
+                      disabled={!volumeResult}
+                    />
+                  </div>
+                )}
+              </div>
+
               {/* Physics Controls */}
               <div className="bg-gray-900 rounded-xl p-4">
-                <h2 className="text-sm font-medium text-gray-400 mb-4">Physics Controls</h2>
+                <h2 className="text-sm font-medium text-gray-400 mb-4">Pour Simulation</h2>
                 <PhysicsControls
                   fillLevel={fillLevel}
                   tiltAngle={tiltAngle}
@@ -215,30 +254,30 @@ export default function Home() {
               </div>
 
               {/* Detection Info */}
-              {volumeResult && (
+              {adjustedCylinder && (
                 <div className="bg-gray-900 rounded-xl p-4">
-                  <h2 className="text-sm font-medium text-gray-400 mb-3">Detection Info</h2>
+                  <h2 className="text-sm font-medium text-gray-400 mb-3">Cylinder Info</h2>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
                       <span className="text-gray-500">Orientation</span>
-                      <span className="text-gray-300 capitalize">{volumeResult.orientation}</span>
+                      <span className="text-gray-300 capitalize">{volumeResult?.orientation || 'unknown'}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Cylinder Radius</span>
                       <span className="text-gray-300">
-                        {(volumeResult.cylinder.radius * unitScale * 100).toFixed(1)} cm
+                        {(adjustedCylinder.radius * unitScale * 100).toFixed(1)} cm
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Cylinder Height</span>
                       <span className="text-gray-300">
-                        {(volumeResult.cylinder.height * unitScale * 100).toFixed(1)} cm
+                        {(adjustedCylinder.height * unitScale * 100).toFixed(1)} cm
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-500">Confidence</span>
                       <span className="text-gray-300">
-                        {(volumeResult.cylinder.confidence * 100).toFixed(0)}%
+                        {(adjustedCylinder.confidence * 100).toFixed(0)}%
                       </span>
                     </div>
                   </div>

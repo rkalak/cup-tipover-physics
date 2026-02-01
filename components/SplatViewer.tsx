@@ -6,10 +6,12 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CylinderFit } from '@/lib/cylinder-fitting';
 import { PhysicsState, toRadians } from '@/lib/tipover-physics';
 import { parsePlyFile, ParsedPly } from '@/lib/ply-parser';
+import { CylinderAdjustments } from './CylinderControls';
 
 interface PlyViewerProps {
   plyBuffer: ArrayBuffer | null;
   cylinder: CylinderFit | null;
+  cylinderAdjustments?: CylinderAdjustments;
   physicsState: PhysicsState | null;
   tiltAngle: number;
   onSceneReady?: (scene: THREE.Scene) => void;
@@ -18,6 +20,7 @@ interface PlyViewerProps {
 export default function PlyViewer({
   plyBuffer,
   cylinder,
+  cylinderAdjustments,
   physicsState,
   tiltAngle,
   onSceneReady
@@ -212,11 +215,29 @@ export default function PlyViewer({
       }
     }
 
+    // Apply adjustments
+    const adj = cylinderAdjustments || {
+      rotationX: 0, rotationY: 0, rotationZ: 0,
+      offsetX: 0, offsetY: 0, offsetZ: 0,
+      radiusScale: 1, heightScale: 1
+    };
+
+    const adjustedRadius = cylinder.radius * adj.radiusScale;
+    const adjustedHeight = cylinder.height * adj.heightScale;
+    const adjustedCenter: [number, number, number] = [
+      cylinder.center[0] + adj.offsetX,
+      cylinder.center[1] + adj.offsetY,
+      cylinder.center[2] + adj.offsetZ
+    ];
+
+    // Create a container group for the cylinder that we can rotate
+    const cylinderGroup = new THREE.Group();
+
     // Create cylinder outline
     const outlineGeometry = new THREE.CylinderGeometry(
-      cylinder.radius,
-      cylinder.radius,
-      cylinder.height,
+      adjustedRadius,
+      adjustedRadius,
+      adjustedHeight,
       32,
       1,
       true  // Open-ended
@@ -224,24 +245,20 @@ export default function PlyViewer({
     const outlineMaterial = new THREE.MeshBasicMaterial({
       color: 0x00ff88,
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.3,
       side: THREE.DoubleSide,
       wireframe: true
     });
     const outline = new THREE.Mesh(outlineGeometry, outlineMaterial);
-    outline.position.set(
-      cylinder.center[0],
-      cylinder.center[1] + cylinder.height / 2,
-      cylinder.center[2]
-    );
-    group.add(outline);
+    outline.position.set(0, adjustedHeight / 2, 0);
+    cylinderGroup.add(outline);
 
     // Create liquid mesh
     if (physicsState && physicsState.fillLevel > 0) {
-      const liquidHeight = cylinder.height * physicsState.fillLevel;
+      const liquidHeight = adjustedHeight * physicsState.fillLevel;
       const liquidGeometry = new THREE.CylinderGeometry(
-        cylinder.radius * 0.9,
-        cylinder.radius * 0.9,
+        adjustedRadius * 0.9,
+        adjustedRadius * 0.9,
         liquidHeight,
         32
       );
@@ -252,15 +269,11 @@ export default function PlyViewer({
         side: THREE.DoubleSide
       });
       const liquid = new THREE.Mesh(liquidGeometry, liquidMaterial);
-      liquid.position.set(
-        cylinder.center[0],
-        cylinder.center[1] + liquidHeight / 2,
-        cylinder.center[2]
-      );
-      group.add(liquid);
+      liquid.position.set(0, liquidHeight / 2, 0);
+      cylinderGroup.add(liquid);
 
       // Liquid surface disc
-      const surfaceGeometry = new THREE.CircleGeometry(cylinder.radius * 0.9, 32);
+      const surfaceGeometry = new THREE.CircleGeometry(adjustedRadius * 0.9, 32);
       const surfaceMaterial = new THREE.MeshBasicMaterial({
         color: 0x66aaff,
         transparent: true,
@@ -269,38 +282,28 @@ export default function PlyViewer({
       });
       const surface = new THREE.Mesh(surfaceGeometry, surfaceMaterial);
       surface.rotation.x = -Math.PI / 2;
-      surface.position.set(
-        cylinder.center[0],
-        cylinder.center[1] + liquidHeight,
-        cylinder.center[2]
-      );
-      group.add(surface);
+      surface.position.set(0, liquidHeight, 0);
+      cylinderGroup.add(surface);
     }
 
     // Create center of mass marker
     if (physicsState) {
-      const comGeometry = new THREE.SphereGeometry(cylinder.radius * 0.12, 16, 16);
+      const comGeometry = new THREE.SphereGeometry(adjustedRadius * 0.12, 16, 16);
       const comMaterial = new THREE.MeshBasicMaterial({
         color: physicsState.isStable ? 0x44ff44 : 0xff4444,
         transparent: true,
         opacity: 0.9
       });
       const com = new THREE.Mesh(comGeometry, comMaterial);
-      com.position.set(
-        physicsState.centerOfMass.x,
-        physicsState.centerOfMass.y,
-        physicsState.centerOfMass.z
-      );
-      group.add(com);
+      // Position CoM relative to cylinder base
+      const comRelativeY = physicsState.centerOfMass.y - cylinder.center[1];
+      com.position.set(0, comRelativeY, 0);
+      cylinderGroup.add(com);
 
       // Line from base to CoM
       const linePoints = [
-        new THREE.Vector3(cylinder.center[0], cylinder.center[1], cylinder.center[2]),
-        new THREE.Vector3(
-          physicsState.centerOfMass.x,
-          physicsState.centerOfMass.y,
-          physicsState.centerOfMass.z
-        )
+        new THREE.Vector3(0, 0, 0),
+        new THREE.Vector3(0, comRelativeY, 0)
       ];
       const lineGeometry = new THREE.BufferGeometry().setFromPoints(linePoints);
       const lineMaterial = new THREE.LineBasicMaterial({
@@ -309,12 +312,12 @@ export default function PlyViewer({
         opacity: 0.6
       });
       const line = new THREE.Line(lineGeometry, lineMaterial);
-      group.add(line);
+      cylinderGroup.add(line);
 
       // Base circle indicator
       const baseCircleGeometry = new THREE.RingGeometry(
-        cylinder.radius * 0.95,
-        cylinder.radius,
+        adjustedRadius * 0.95,
+        adjustedRadius,
         32
       );
       const baseCircleMaterial = new THREE.MeshBasicMaterial({
@@ -325,42 +328,56 @@ export default function PlyViewer({
       });
       const baseCircle = new THREE.Mesh(baseCircleGeometry, baseCircleMaterial);
       baseCircle.rotation.x = -Math.PI / 2;
-      baseCircle.position.set(
-        cylinder.center[0],
-        cylinder.center[1] + 0.001,
-        cylinder.center[2]
-      );
-      group.add(baseCircle);
+      baseCircle.position.set(0, 0.001, 0);
+      cylinderGroup.add(baseCircle);
     }
 
-    // Apply tilt
-    const pivotPoint = new THREE.Vector3(
-      cylinder.center[0],
-      cylinder.center[1],
-      cylinder.center[2]
-    );
+    // Apply manual rotation adjustments to align cylinder with cup
+    cylinderGroup.rotation.x = toRadians(adj.rotationX);
+    cylinderGroup.rotation.y = toRadians(adj.rotationY);
+    cylinderGroup.rotation.z = toRadians(adj.rotationZ);
 
-    // Reset position
-    group.position.set(0, 0, 0);
-    group.rotation.set(0, 0, 0);
+    // Position at adjusted center
+    cylinderGroup.position.set(adjustedCenter[0], adjustedCenter[1], adjustedCenter[2]);
 
-    // Apply tilt around Z axis at base
+    group.add(cylinderGroup);
+
+    // Apply tilt for physics simulation (around the base)
     const tiltRad = toRadians(tiltAngle);
-    group.position.sub(pivotPoint);
-    group.rotation.z = tiltRad;
-    group.position.applyAxisAngle(new THREE.Vector3(0, 0, 1), tiltRad);
-    group.position.add(pivotPoint);
+    if (tiltRad !== 0) {
+      // Create pivot at base center
+      const pivot = new THREE.Group();
+      pivot.position.set(adjustedCenter[0], adjustedCenter[1], adjustedCenter[2]);
 
-    // Also tilt the point cloud
-    if (pointCloudRef.current) {
-      pointCloudRef.current.position.set(0, 0, 0);
-      pointCloudRef.current.rotation.set(0, 0, 0);
-      pointCloudRef.current.position.sub(pivotPoint);
-      pointCloudRef.current.rotation.z = tiltRad;
-      pointCloudRef.current.position.applyAxisAngle(new THREE.Vector3(0, 0, 1), tiltRad);
-      pointCloudRef.current.position.add(pivotPoint);
+      // Move cylinder to be relative to pivot
+      cylinderGroup.position.set(0, 0, 0);
+      pivot.add(cylinderGroup);
+
+      // Remove cylinderGroup from main group and add pivot
+      group.remove(cylinderGroup);
+      group.add(pivot);
+
+      // Apply tilt
+      pivot.rotation.z = tiltRad;
+
+      // Also tilt the point cloud
+      if (pointCloudRef.current) {
+        const pivotPoint = new THREE.Vector3(adjustedCenter[0], adjustedCenter[1], adjustedCenter[2]);
+        pointCloudRef.current.position.set(0, 0, 0);
+        pointCloudRef.current.rotation.set(0, 0, 0);
+        pointCloudRef.current.position.sub(pivotPoint);
+        pointCloudRef.current.rotation.z = tiltRad;
+        pointCloudRef.current.position.applyAxisAngle(new THREE.Vector3(0, 0, 1), tiltRad);
+        pointCloudRef.current.position.add(pivotPoint);
+      }
+    } else {
+      // Reset point cloud position when no tilt
+      if (pointCloudRef.current) {
+        pointCloudRef.current.position.set(0, 0, 0);
+        pointCloudRef.current.rotation.set(0, 0, 0);
+      }
     }
-  }, [cylinder, physicsState, tiltAngle]);
+  }, [cylinder, cylinderAdjustments, physicsState, tiltAngle]);
 
   return (
     <div
