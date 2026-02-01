@@ -13,8 +13,8 @@ export default function FileUpload({ onFileLoaded, isLoading }: FileUploadProps)
   const [fileName, setFileName] = useState<string | null>(null);
 
   const handleFile = useCallback(async (file: File) => {
-    if (!file.name.endsWith('.splat') && !file.name.endsWith('.ply')) {
-      alert('Please upload a .splat or .ply file');
+    if (!file.name.endsWith('.ply')) {
+      alert('Please upload a .ply file');
       return;
     }
 
@@ -58,7 +58,7 @@ export default function FileUpload({ onFileLoaded, isLoading }: FileUploadProps)
       <input
         id="file-input"
         type="file"
-        accept=".splat,.ply"
+        accept=".ply"
         className="hidden"
         onChange={handleInputChange}
         disabled={isLoading}
@@ -79,7 +79,7 @@ export default function FileUpload({ onFileLoaded, isLoading }: FileUploadProps)
         ) : (
           <>
             <Upload className="w-12 h-12 text-gray-500" />
-            <p className="text-gray-300">Drop a .splat file here</p>
+            <p className="text-gray-300">Drop a .ply file here</p>
             <p className="text-sm text-gray-500">or click to browse</p>
           </>
         )}

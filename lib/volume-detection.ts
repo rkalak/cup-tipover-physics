@@ -2,7 +2,7 @@
  * Automatic volume detection for cup-shaped objects
  */
 
-import { ParsedSplat, getPositions } from './splat-parser';
+import { ParsedPly, getPositions } from './ply-parser';
 import { fitCircleRANSAC, fitCylinder, CylinderFit } from './cylinder-fitting';
 
 export interface VolumeDetectionResult {
@@ -149,15 +149,15 @@ function findRimHeight(
 /**
  * Detect interior volume of a cup
  */
-export function detectVolume(splat: ParsedSplat): VolumeDetectionResult | null {
-  const positions = getPositions(splat);
+export function detectVolume(ply: ParsedPly): VolumeDetectionResult | null {
+  const positions = getPositions(ply);
   if (positions.length < 100) return null;
 
   // Detect orientation
   const { axis, orientation } = detectOrientation(positions);
 
   // Get height bounds
-  const { min, max } = splat.bounds;
+  const { min, max } = ply.bounds;
   const minY = min[1];
   const maxY = max[1];
 

@@ -1,27 +1,27 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { CylinderFit } from '@/lib/cylinder-fitting';
 import { PhysicsState, toRadians } from '@/lib/tipover-physics';
+import { parsePlyFile, ParsedPly } from '@/lib/ply-parser';
 
-interface SplatViewerProps {
-  splatBuffer: ArrayBuffer | null;
+interface PlyViewerProps {
+  plyBuffer: ArrayBuffer | null;
   cylinder: CylinderFit | null;
   physicsState: PhysicsState | null;
   tiltAngle: number;
   onSceneReady?: (scene: THREE.Scene) => void;
 }
 
-// Splat viewer using point cloud representation
-export default function SplatViewer({
-  splatBuffer,
+export default function PlyViewer({
+  plyBuffer,
   cylinder,
   physicsState,
   tiltAngle,
   onSceneReady
-}: SplatViewerProps) {
+}: PlyViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
@@ -115,9 +115,9 @@ export default function SplatViewer({
     };
   }, [onSceneReady]);
 
-  // Load splat data as point cloud
+  // Load PLY data as point cloud
   useEffect(() => {
-    if (!splatBuffer || !sceneRef.current) return;
+    if (!plyBuffer || !sceneRef.current) return;
 
     const scene = sceneRef.current;
 
@@ -129,45 +129,37 @@ export default function SplatViewer({
       pointCloudRef.current = null;
     }
 
-    // Parse splat data
-    const BYTES_PER_GAUSSIAN = 32;
-    const dataView = new DataView(splatBuffer);
-    const numGaussians = Math.floor(splatBuffer.byteLength / BYTES_PER_GAUSSIAN);
+    // Parse PLY data
+    let parsedPly: ParsedPly;
+    try {
+      parsedPly = parsePlyFile(plyBuffer);
+    } catch (err) {
+      console.error('Failed to parse PLY file:', err);
+      return;
+    }
 
-    const positions = new Float32Array(numGaussians * 3);
-    const colors = new Float32Array(numGaussians * 3);
+    const { points, bounds } = parsedPly;
+    const numPoints = points.length;
 
-    let minX = Infinity, minY = Infinity, minZ = Infinity;
-    let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+    const positions = new Float32Array(numPoints * 3);
+    const colors = new Float32Array(numPoints * 3);
 
-    for (let i = 0; i < numGaussians; i++) {
-      const offset = i * BYTES_PER_GAUSSIAN;
+    for (let i = 0; i < numPoints; i++) {
+      const point = points[i];
+      positions[i * 3] = point.position[0];
+      positions[i * 3 + 1] = point.position[1];
+      positions[i * 3 + 2] = point.position[2];
 
-      const x = dataView.getFloat32(offset, true);
-      const y = dataView.getFloat32(offset + 4, true);
-      const z = dataView.getFloat32(offset + 8, true);
-
-      if (!isFinite(x) || !isFinite(y) || !isFinite(z)) continue;
-
-      positions[i * 3] = x;
-      positions[i * 3 + 1] = y;
-      positions[i * 3 + 2] = z;
-
-      // Read color
-      const r = dataView.getUint8(offset + 24) / 255;
-      const g = dataView.getUint8(offset + 25) / 255;
-      const b = dataView.getUint8(offset + 26) / 255;
-
-      colors[i * 3] = r;
-      colors[i * 3 + 1] = g;
-      colors[i * 3 + 2] = b;
-
-      minX = Math.min(minX, x);
-      minY = Math.min(minY, y);
-      minZ = Math.min(minZ, z);
-      maxX = Math.max(maxX, x);
-      maxY = Math.max(maxY, y);
-      maxZ = Math.max(maxZ, z);
+      // Use color if available, otherwise default to gray
+      if (point.color) {
+        colors[i * 3] = point.color[0] / 255;
+        colors[i * 3 + 1] = point.color[1] / 255;
+        colors[i * 3 + 2] = point.color[2] / 255;
+      } else {
+        colors[i * 3] = 0.7;
+        colors[i * 3 + 1] = 0.7;
+        colors[i * 3 + 2] = 0.7;
+      }
     }
 
     // Create point cloud geometry
@@ -186,21 +178,19 @@ export default function SplatViewer({
     pointCloudRef.current = pointCloud;
 
     // Center camera on object
-    const centerX = (minX + maxX) / 2;
-    const centerY = (minY + maxY) / 2;
-    const centerZ = (minZ + maxZ) / 2;
-    const size = Math.max(maxX - minX, maxY - minY, maxZ - minZ);
+    const { min, max, center } = bounds;
+    const size = Math.max(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
 
     if (controlsRef.current && cameraRef.current) {
-      controlsRef.current.target.set(centerX, centerY, centerZ);
+      controlsRef.current.target.set(center[0], center[1], center[2]);
       cameraRef.current.position.set(
-        centerX + size * 1.5,
-        centerY + size * 0.5,
-        centerZ + size * 1.5
+        center[0] + size * 1.5,
+        center[1] + size * 0.5,
+        center[2] + size * 1.5
       );
       controlsRef.current.update();
     }
-  }, [splatBuffer]);
+  }, [plyBuffer]);
 
   // Update overlay visualization
   useEffect(() => {

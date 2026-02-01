@@ -1,11 +1,11 @@
 # Cup Tipover Physics Analyzer
 
-A Next.js web application that analyzes gaussian splat (.splat) files of cups, automatically detects their internal volume, and provides interactive tipover physics visualization.
+A Next.js web application that analyzes PLY point cloud files of cups, automatically detects their internal volume, and provides interactive tipover physics visualization.
 
 ## Features
 
-- **Splat Viewer**: Upload and render gaussian splat files with orbit controls
-- **Automatic Volume Detection**: Parses splat point positions, detects cup rim via point density analysis, and fits a cylinder to the interior
+- **PLY Viewer**: Upload and render PLY point cloud files with orbit controls
+- **Automatic Volume Detection**: Parses point positions, detects cup rim via point density analysis, and fits a cylinder to the interior
 - **Tipover Physics**: Interactive simulation with fill level and tilt angle controls
 - **Real-time Visualization**: Shows liquid level, center of mass, and stability status
 
@@ -20,7 +20,7 @@ A Next.js web application that analyzes gaussian splat (.splat) files of cups, a
 
 ```bash
 # Clone the repository
-git clone https://github.com/rahulkalakuntla/cup-tipover-physics.git
+git clone https://github.com/rkalak/cup-tipover-physics.git
 cd cup-tipover-physics
 
 # Install dependencies
@@ -34,7 +34,7 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Usage
 
-1. **Upload a Splat File**: Drag and drop a `.splat` file of a cup onto the upload area
+1. **Upload a PLY File**: Drag and drop a `.ply` file of a cup onto the upload area
 2. **View Detection**: The app automatically detects the cup interior and displays a cylinder overlay
 3. **Adjust Fill Level**: Use the slider to set how full the cup is (0-100%)
 4. **Adjust Tilt Angle**: Use the slider to tilt the cup (0-90°)
@@ -45,14 +45,12 @@ Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ## Technical Details
 
-### Splat File Format
+### PLY File Format
 
-The app parses the standard `.splat` binary format:
-- 32 bytes per gaussian
-- Position: 3x float32 (12 bytes)
-- Scale: 3x float32 (12 bytes)
-- Color: 4x uint8 RGBA (4 bytes)
-- Rotation: 4x uint8 quaternion (4 bytes)
+The app supports both ASCII and binary PLY formats with the following properties:
+- **Position**: x, y, z coordinates (required)
+- **Color**: red, green, blue (optional)
+- **Alpha**: alpha channel (optional)
 
 ### Volume Detection Algorithm
 
@@ -89,13 +87,13 @@ cup-tipover-physics/
 │   ├── TipoverIndicator.tsx   # Status display
 │   └── VolumeOverlay.tsx      # Cylinder visualization
 ├── lib/
-│   ├── splat-parser.ts        # Parse .splat files
+│   ├── ply-parser.ts          # Parse .ply files
 │   ├── volume-detection.ts    # Auto-detect cup interior
 │   ├── tipover-physics.ts     # Physics calculations
 │   ├── cylinder-fitting.ts    # RANSAC cylinder fit
 │   └── utils.ts               # Utility functions
 └── public/
-    └── (sample splat files)
+    └── (sample PLY files)
 ```
 
 ## License

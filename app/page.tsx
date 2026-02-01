@@ -5,14 +5,14 @@ import dynamic from 'next/dynamic';
 import FileUpload from '@/components/FileUpload';
 import PhysicsControls from '@/components/PhysicsControls';
 import TipoverIndicator from '@/components/TipoverIndicator';
-import { parseSplatFile, ParsedSplat } from '@/lib/splat-parser';
+import { parsePlyFile, ParsedPly } from '@/lib/ply-parser';
 import { detectVolume, VolumeDetectionResult, volumeToML, estimateCupMass } from '@/lib/volume-detection';
 import { calculatePhysicsState, PhysicsState, toRadians, CylinderParams } from '@/lib/tipover-physics';
 import { CylinderFit } from '@/lib/cylinder-fitting';
 import { Beaker, RotateCcw, Info } from 'lucide-react';
 
-// Dynamic import for SplatViewer to avoid SSR issues with Three.js
-const SplatViewer = dynamic(() => import('@/components/SplatViewer'), {
+// Dynamic import for PlyViewer to avoid SSR issues with Three.js
+const PlyViewer = dynamic(() => import('@/components/SplatViewer'), {
   ssr: false,
   loading: () => (
     <div className="w-full h-full min-h-[400px] bg-gray-900 rounded-lg flex items-center justify-center">
@@ -28,7 +28,6 @@ function estimateUnitScale(cylinder: CylinderFit): number {
   // If detected height is around 10, units are likely centimeters
   // If detected height is around 100, units are likely millimeters
 
-  const typicalCupHeight = 0.1; // 10cm in meters
   const detectedHeight = cylinder.height;
 
   if (detectedHeight < 0.5) {
@@ -44,8 +43,8 @@ function estimateUnitScale(cylinder: CylinderFit): number {
 }
 
 export default function Home() {
-  const [splatBuffer, setSplatBuffer] = useState<ArrayBuffer | null>(null);
-  const [parsedSplat, setParsedSplat] = useState<ParsedSplat | null>(null);
+  const [plyBuffer, setPlyBuffer] = useState<ArrayBuffer | null>(null);
+  const [parsedPly, setParsedPly] = useState<ParsedPly | null>(null);
   const [volumeResult, setVolumeResult] = useState<VolumeDetectionResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [fillLevel, setFillLevel] = useState(0.65);
@@ -57,21 +56,21 @@ export default function Home() {
     setError(null);
 
     try {
-      // Parse splat file
-      const parsed = parseSplatFile(buffer);
-      setParsedSplat(parsed);
-      setSplatBuffer(buffer);
+      // Parse PLY file
+      const parsed = parsePlyFile(buffer);
+      setParsedPly(parsed);
+      setPlyBuffer(buffer);
 
       // Detect volume
       const volume = detectVolume(parsed);
       if (volume) {
         setVolumeResult(volume);
       } else {
-        setError('Could not detect cup interior. Try a different splat file.');
+        setError('Could not detect cup interior. Try a different PLY file.');
       }
     } catch (err) {
-      console.error('Error processing splat:', err);
-      setError('Failed to parse splat file. Make sure it\'s a valid .splat format.');
+      console.error('Error processing PLY:', err);
+      setError('Failed to parse PLY file. Make sure it\'s a valid .ply format.');
     } finally {
       setIsLoading(false);
     }
@@ -145,7 +144,7 @@ export default function Home() {
       </header>
 
       <div className="max-w-7xl mx-auto p-6">
-        {!splatBuffer ? (
+        {!plyBuffer ? (
           // Upload state
           <div className="max-w-xl mx-auto mt-20">
             <FileUpload onFileLoaded={handleFileLoaded} isLoading={isLoading} />
@@ -155,7 +154,7 @@ export default function Home() {
                 <div className="text-sm text-gray-400">
                   <p className="font-medium text-gray-300 mb-2">How it works:</p>
                   <ol className="list-decimal list-inside space-y-1">
-                    <li>Upload a gaussian splat (.splat) file of a cup</li>
+                    <li>Upload a PLY point cloud (.ply) file of a cup</li>
                     <li>The app automatically detects the cup's interior volume</li>
                     <li>Adjust fill level and tilt angle to see physics simulation</li>
                     <li>View tipover angle and stability status in real-time</li>
@@ -170,8 +169,8 @@ export default function Home() {
             {/* 3D Viewer */}
             <div className="lg:col-span-2">
               <div className="bg-gray-900 rounded-xl overflow-hidden" style={{ height: '500px' }}>
-                <SplatViewer
-                  splatBuffer={splatBuffer}
+                <PlyViewer
+                  plyBuffer={plyBuffer}
                   cylinder={volumeResult?.cylinder || null}
                   physicsState={physicsState}
                   tiltAngle={tiltAngle}
@@ -189,7 +188,7 @@ export default function Home() {
             <div className="space-y-6">
               {/* File Upload */}
               <div className="bg-gray-900 rounded-xl p-4">
-                <h2 className="text-sm font-medium text-gray-400 mb-3">Splat File</h2>
+                <h2 className="text-sm font-medium text-gray-400 mb-3">PLY File</h2>
                 <FileUpload onFileLoaded={handleFileLoaded} isLoading={isLoading} />
               </div>
 
