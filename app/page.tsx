@@ -6,6 +6,7 @@ import FileUpload from '@/components/FileUpload';
 import PhysicsControls from '@/components/PhysicsControls';
 import TipoverIndicator from '@/components/TipoverIndicator';
 import CylinderControls, { CylinderAdjustments, defaultAdjustments } from '@/components/CylinderControls';
+import PlyControls, { PlyAdjustments, defaultPlyAdjustments } from '@/components/PlyControls';
 import { parsePlyFile, ParsedPly } from '@/lib/ply-parser';
 import { detectVolume, VolumeDetectionResult, volumeToML, estimateCupMass } from '@/lib/volume-detection';
 import { calculatePhysicsState, PhysicsState, toRadians, CylinderParams } from '@/lib/tipover-physics';
@@ -44,12 +45,15 @@ export default function Home() {
   const [tiltAngle, setTiltAngle] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [cylinderAdjustments, setCylinderAdjustments] = useState<CylinderAdjustments>(defaultAdjustments);
+  const [plyAdjustments, setPlyAdjustments] = useState<PlyAdjustments>(defaultPlyAdjustments);
   const [showCylinderControls, setShowCylinderControls] = useState(false);
+  const [showPlyControls, setShowPlyControls] = useState(false);
 
   const handleFileLoaded = useCallback(async (buffer: ArrayBuffer, fileName: string) => {
     setIsLoading(true);
     setError(null);
-    setCylinderAdjustments(defaultAdjustments); // Reset adjustments on new file
+    setCylinderAdjustments(defaultAdjustments);
+    setPlyAdjustments(defaultPlyAdjustments);
 
     try {
       const parsed = parsePlyFile(buffer);
@@ -74,6 +78,7 @@ export default function Home() {
     setFillLevel(0.65);
     setTiltAngle(0);
     setCylinderAdjustments(defaultAdjustments);
+    setPlyAdjustments(defaultPlyAdjustments);
   }, []);
 
   // Get adjusted cylinder for physics calculations
@@ -168,7 +173,7 @@ export default function Home() {
                   <ol className="list-decimal list-inside space-y-1">
                     <li>Upload a PLY point cloud (.ply) file of a cup</li>
                     <li>The app automatically detects the cup's interior volume</li>
-                    <li>Adjust cylinder alignment manually if needed</li>
+                    <li>Adjust point cloud and cylinder alignment manually if needed</li>
                     <li>Adjust fill level and tilt angle to simulate pouring</li>
                     <li>View spill analysis and stability status in real-time</li>
                   </ol>
@@ -184,6 +189,7 @@ export default function Home() {
               <div className="bg-gray-900 rounded-xl overflow-hidden" style={{ height: '500px' }}>
                 <PlyViewer
                   plyBuffer={plyBuffer}
+                  plyAdjustments={plyAdjustments}
                   cylinder={volumeResult?.cylinder || null}
                   cylinderAdjustments={cylinderAdjustments}
                   physicsState={physicsState}
@@ -204,6 +210,31 @@ export default function Home() {
               <div className="bg-gray-900 rounded-xl p-4">
                 <h2 className="text-sm font-medium text-gray-400 mb-3">PLY File</h2>
                 <FileUpload onFileLoaded={handleFileLoaded} isLoading={isLoading} />
+              </div>
+
+              {/* Manual PLY Adjustments */}
+              <div className="bg-gray-900 rounded-xl p-4">
+                <button
+                  onClick={() => setShowPlyControls(!showPlyControls)}
+                  className="w-full flex items-center justify-between text-sm font-medium text-gray-400 hover:text-gray-300 transition-colors"
+                >
+                  <span>Point Cloud Transform</span>
+                  {showPlyControls ? (
+                    <ChevronDown className="w-4 h-4" />
+                  ) : (
+                    <ChevronRight className="w-4 h-4" />
+                  )}
+                </button>
+                {showPlyControls && (
+                  <div className="mt-4">
+                    <PlyControls
+                      adjustments={plyAdjustments}
+                      onChange={setPlyAdjustments}
+                      bounds={parsedPly?.bounds || null}
+                      disabled={!parsedPly}
+                    />
+                  </div>
+                )}
               </div>
 
               {/* Manual Cylinder Adjustments */}

@@ -7,9 +7,11 @@ import { CylinderFit } from '@/lib/cylinder-fitting';
 import { PhysicsState, toRadians } from '@/lib/tipover-physics';
 import { parsePlyFile, ParsedPly } from '@/lib/ply-parser';
 import { CylinderAdjustments } from './CylinderControls';
+import { PlyAdjustments } from './PlyControls';
 
 interface PlyViewerProps {
   plyBuffer: ArrayBuffer | null;
+  plyAdjustments?: PlyAdjustments;
   cylinder: CylinderFit | null;
   cylinderAdjustments?: CylinderAdjustments;
   physicsState: PhysicsState | null;
@@ -19,6 +21,7 @@ interface PlyViewerProps {
 
 export default function PlyViewer({
   plyBuffer,
+  plyAdjustments,
   cylinder,
   cylinderAdjustments,
   physicsState,
@@ -31,8 +34,10 @@ export default function PlyViewer({
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const controlsRef = useRef<OrbitControls | null>(null);
   const pointCloudRef = useRef<THREE.Points | null>(null);
+  const plyGroupRef = useRef<THREE.Group | null>(null);
   const overlayGroupRef = useRef<THREE.Group | null>(null);
   const animationFrameRef = useRef<number | null>(null);
+  const boundsRef = useRef<{ center: [number, number, number] } | null>(null);
 
   // Initialize Three.js scene
   useEffect(() => {
@@ -78,6 +83,12 @@ export default function PlyViewer({
     const gridHelper = new THREE.GridHelper(2, 20, 0x444444, 0x333333);
     scene.add(gridHelper);
 
+    // PLY group for point cloud with adjustments
+    const plyGroup = new THREE.Group();
+    plyGroup.name = 'plyGroup';
+    scene.add(plyGroup);
+    plyGroupRef.current = plyGroup;
+
     // Overlay group for cylinder visualization
     const overlayGroup = new THREE.Group();
     overlayGroup.name = 'overlay';
@@ -120,13 +131,13 @@ export default function PlyViewer({
 
   // Load PLY data as point cloud
   useEffect(() => {
-    if (!plyBuffer || !sceneRef.current) return;
+    if (!plyBuffer || !sceneRef.current || !plyGroupRef.current) return;
 
-    const scene = sceneRef.current;
+    const plyGroup = plyGroupRef.current;
 
     // Remove old point cloud
     if (pointCloudRef.current) {
-      scene.remove(pointCloudRef.current);
+      plyGroup.remove(pointCloudRef.current);
       pointCloudRef.current.geometry.dispose();
       (pointCloudRef.current.material as THREE.PointsMaterial).dispose();
       pointCloudRef.current = null;
@@ -143,6 +154,7 @@ export default function PlyViewer({
 
     const { points, bounds } = parsedPly;
     const numPoints = points.length;
+    boundsRef.current = { center: bounds.center };
 
     const positions = new Float32Array(numPoints * 3);
     const colors = new Float32Array(numPoints * 3);
@@ -153,7 +165,6 @@ export default function PlyViewer({
       positions[i * 3 + 1] = point.position[1];
       positions[i * 3 + 2] = point.position[2];
 
-      // Use color if available, otherwise default to gray
       if (point.color) {
         colors[i * 3] = point.color[0] / 255;
         colors[i * 3 + 1] = point.color[1] / 255;
@@ -177,7 +188,7 @@ export default function PlyViewer({
     });
 
     const pointCloud = new THREE.Points(geometry, material);
-    scene.add(pointCloud);
+    plyGroup.add(pointCloud);
     pointCloudRef.current = pointCloud;
 
     // Center camera on object
@@ -194,6 +205,59 @@ export default function PlyViewer({
       controlsRef.current.update();
     }
   }, [plyBuffer]);
+
+  // Apply PLY adjustments
+  useEffect(() => {
+    if (!plyGroupRef.current || !boundsRef.current) return;
+
+    const plyGroup = plyGroupRef.current;
+    const center = boundsRef.current.center;
+
+    const adj = plyAdjustments || {
+      rotationX: 0, rotationY: 0, rotationZ: 0,
+      offsetX: 0, offsetY: 0, offsetZ: 0,
+      scale: 1
+    };
+
+    // Reset transforms
+    plyGroup.position.set(0, 0, 0);
+    plyGroup.rotation.set(0, 0, 0);
+    plyGroup.scale.set(1, 1, 1);
+
+    // Apply rotation around the center of the point cloud
+    // First translate to origin, rotate, then translate back
+    const pivotPoint = new THREE.Vector3(center[0], center[1], center[2]);
+
+    // Create rotation matrix
+    const rotationMatrix = new THREE.Matrix4();
+    rotationMatrix.makeRotationFromEuler(
+      new THREE.Euler(
+        toRadians(adj.rotationX),
+        toRadians(adj.rotationY),
+        toRadians(adj.rotationZ),
+        'XYZ'
+      )
+    );
+
+    // Apply: translate to origin -> rotate -> translate back -> apply offset
+    plyGroup.position.sub(pivotPoint);
+    plyGroup.position.applyMatrix4(rotationMatrix);
+    plyGroup.position.add(pivotPoint);
+
+    // Apply rotation to group
+    plyGroup.rotation.x = toRadians(adj.rotationX);
+    plyGroup.rotation.y = toRadians(adj.rotationY);
+    plyGroup.rotation.z = toRadians(adj.rotationZ);
+
+    // Apply position offset
+    plyGroup.position.x += adj.offsetX;
+    plyGroup.position.y += adj.offsetY;
+    plyGroup.position.z += adj.offsetZ;
+
+    // Apply scale
+    plyGroup.scale.set(adj.scale, adj.scale, adj.scale);
+
+  }, [plyAdjustments]);
 
   // Update overlay visualization
   useEffect(() => {
@@ -215,22 +279,55 @@ export default function PlyViewer({
       }
     }
 
-    // Apply adjustments
-    const adj = cylinderAdjustments || {
+    // Apply cylinder adjustments
+    const cylAdj = cylinderAdjustments || {
       rotationX: 0, rotationY: 0, rotationZ: 0,
       offsetX: 0, offsetY: 0, offsetZ: 0,
       radiusScale: 1, heightScale: 1
     };
 
-    const adjustedRadius = cylinder.radius * adj.radiusScale;
-    const adjustedHeight = cylinder.height * adj.heightScale;
-    const adjustedCenter: [number, number, number] = [
-      cylinder.center[0] + adj.offsetX,
-      cylinder.center[1] + adj.offsetY,
-      cylinder.center[2] + adj.offsetZ
-    ];
+    // Apply PLY adjustments to cylinder position as well
+    const plyAdj = plyAdjustments || {
+      rotationX: 0, rotationY: 0, rotationZ: 0,
+      offsetX: 0, offsetY: 0, offsetZ: 0,
+      scale: 1
+    };
 
-    // Create a container group for the cylinder that we can rotate
+    const adjustedRadius = cylinder.radius * cylAdj.radiusScale * plyAdj.scale;
+    const adjustedHeight = cylinder.height * cylAdj.heightScale * plyAdj.scale;
+
+    // Transform cylinder center based on PLY adjustments
+    let adjustedCenter = new THREE.Vector3(
+      cylinder.center[0] + cylAdj.offsetX,
+      cylinder.center[1] + cylAdj.offsetY,
+      cylinder.center[2] + cylAdj.offsetZ
+    );
+
+    // Apply PLY rotation to cylinder center
+    if (boundsRef.current) {
+      const pivotPoint = new THREE.Vector3(
+        boundsRef.current.center[0],
+        boundsRef.current.center[1],
+        boundsRef.current.center[2]
+      );
+
+      adjustedCenter.sub(pivotPoint);
+      adjustedCenter.applyEuler(new THREE.Euler(
+        toRadians(plyAdj.rotationX),
+        toRadians(plyAdj.rotationY),
+        toRadians(plyAdj.rotationZ),
+        'XYZ'
+      ));
+      adjustedCenter.multiplyScalar(plyAdj.scale);
+      adjustedCenter.add(pivotPoint);
+    }
+
+    // Apply PLY offset
+    adjustedCenter.x += plyAdj.offsetX;
+    adjustedCenter.y += plyAdj.offsetY;
+    adjustedCenter.z += plyAdj.offsetZ;
+
+    // Create a container group for the cylinder
     const cylinderGroup = new THREE.Group();
 
     // Create cylinder outline
@@ -240,7 +337,7 @@ export default function PlyViewer({
       adjustedHeight,
       32,
       1,
-      true  // Open-ended
+      true
     );
     const outlineMaterial = new THREE.MeshBasicMaterial({
       color: 0x00ff88,
@@ -295,8 +392,7 @@ export default function PlyViewer({
         opacity: 0.9
       });
       const com = new THREE.Mesh(comGeometry, comMaterial);
-      // Position CoM relative to cylinder base
-      const comRelativeY = physicsState.centerOfMass.y - cylinder.center[1];
+      const comRelativeY = (physicsState.centerOfMass.y - cylinder.center[1]) * plyAdj.scale;
       com.position.set(0, comRelativeY, 0);
       cylinderGroup.add(com);
 
@@ -332,52 +428,51 @@ export default function PlyViewer({
       cylinderGroup.add(baseCircle);
     }
 
-    // Apply manual rotation adjustments to align cylinder with cup
-    cylinderGroup.rotation.x = toRadians(adj.rotationX);
-    cylinderGroup.rotation.y = toRadians(adj.rotationY);
-    cylinderGroup.rotation.z = toRadians(adj.rotationZ);
+    // Apply PLY rotation to cylinder group
+    cylinderGroup.rotation.x = toRadians(plyAdj.rotationX + cylAdj.rotationX);
+    cylinderGroup.rotation.y = toRadians(plyAdj.rotationY + cylAdj.rotationY);
+    cylinderGroup.rotation.z = toRadians(plyAdj.rotationZ + cylAdj.rotationZ);
 
     // Position at adjusted center
-    cylinderGroup.position.set(adjustedCenter[0], adjustedCenter[1], adjustedCenter[2]);
+    cylinderGroup.position.copy(adjustedCenter);
 
     group.add(cylinderGroup);
 
-    // Apply tilt for physics simulation (around the base)
+    // Apply tilt for physics simulation
     const tiltRad = toRadians(tiltAngle);
     if (tiltRad !== 0) {
       // Create pivot at base center
       const pivot = new THREE.Group();
-      pivot.position.set(adjustedCenter[0], adjustedCenter[1], adjustedCenter[2]);
+      pivot.position.copy(adjustedCenter);
 
-      // Move cylinder to be relative to pivot
       cylinderGroup.position.set(0, 0, 0);
       pivot.add(cylinderGroup);
 
-      // Remove cylinderGroup from main group and add pivot
       group.remove(cylinderGroup);
       group.add(pivot);
 
-      // Apply tilt
       pivot.rotation.z = tiltRad;
 
-      // Also tilt the point cloud
-      if (pointCloudRef.current) {
-        const pivotPoint = new THREE.Vector3(adjustedCenter[0], adjustedCenter[1], adjustedCenter[2]);
-        pointCloudRef.current.position.set(0, 0, 0);
-        pointCloudRef.current.rotation.set(0, 0, 0);
-        pointCloudRef.current.position.sub(pivotPoint);
-        pointCloudRef.current.rotation.z = tiltRad;
-        pointCloudRef.current.position.applyAxisAngle(new THREE.Vector3(0, 0, 1), tiltRad);
-        pointCloudRef.current.position.add(pivotPoint);
-      }
-    } else {
-      // Reset point cloud position when no tilt
-      if (pointCloudRef.current) {
-        pointCloudRef.current.position.set(0, 0, 0);
-        pointCloudRef.current.rotation.set(0, 0, 0);
+      // Also tilt the PLY group
+      if (plyGroupRef.current) {
+        const plyGroup = plyGroupRef.current;
+
+        // Store current transforms
+        const currentPos = plyGroup.position.clone();
+        const currentRot = plyGroup.rotation.clone();
+
+        // Apply tilt around the cylinder base
+        plyGroup.position.sub(adjustedCenter);
+
+        // Create a temporary group to apply the tilt
+        const tiltMatrix = new THREE.Matrix4().makeRotationZ(tiltRad);
+        plyGroup.position.applyMatrix4(tiltMatrix);
+
+        plyGroup.position.add(adjustedCenter);
+        plyGroup.rotation.z = currentRot.z + tiltRad;
       }
     }
-  }, [cylinder, cylinderAdjustments, physicsState, tiltAngle]);
+  }, [cylinder, cylinderAdjustments, plyAdjustments, physicsState, tiltAngle]);
 
   return (
     <div
